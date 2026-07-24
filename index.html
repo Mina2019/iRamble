@@ -96,51 +96,110 @@
   <div class="modal" id="reserveModal" aria-hidden="true"><form class="dialog" id="reserveForm"><h2>Reserve a circle</h2><p>Pick a topic. Your room is public, and can begin even if it is not full.</p><label for="hostName">Your display name</label><input id="hostName" required maxlength="24" placeholder="e.g. Mina"><label for="topic">Conversation topic</label><input id="topic" required maxlength="60" placeholder="e.g. Calgary Stampede"><label for="when">Start time</label><select id="when"><option value="0">Start now</option><option value="1">Start in 1 minute</option><option value="5">Start in 5 minutes</option><option value="15">Start in 15 minutes</option></select><div class="actions"><button type="button" class="soft" id="cancelReserve">Cancel</button><button class="primary">Reserve circle</button></div></form></div>
   <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
   <script>
-    const STORAGE = 'iramble-public-rooms-v2';
     const TALK_DURATION_MS = 15 * 60 * 1000;
-    const TOKEN_ENDPOINT = 'https://iramble-token.hassanvandmina.workers.dev/token';
-    let rooms = JSON.parse(localStorage.getItem(STORAGE) || '[]');
+    const API_ENDPOINT = 'https://iramble-token.hassanvandmina.workers.dev';
+    const TOKEN_ENDPOINT = `${API_ENDPOINT}/token`;
+    const MEMBER_KEY = 'iramble-shared-member-id';
+    const NAME_KEY = 'iramble-shared-display-name';
+    let memberId = localStorage.getItem(MEMBER_KEY);
+    if (!memberId) { memberId = crypto.randomUUID(); localStorage.setItem(MEMBER_KEY, memberId); }
+    let rooms = [];
     let reservingIndex = null, openIndex = null;
     let livekitRoom = null, audioConnected = false, microphoneOn = false, audioIdentity = null, talkHasEnded = false;
     const $ = id => document.getElementById(id);
-    const save = () => localStorage.setItem(STORAGE, JSON.stringify(rooms));
-    const initials = name => name.split(/\s+/).map(x=>x[0]).join('').slice(0,2).toUpperCase();
-    function active(room) { return room && room.topic; }
-    function isLive(room) { return Date.now() >= room.startsAt; }
-    function timeLabel(room) { const seconds=Math.max(0,Math.ceil((room.startsAt-Date.now())/1000)); if(seconds===0) return 'LIVE'; return `starts in ${Math.ceil(seconds/60)} min`; }
-    function talkSecondsLeft(room) { return Math.max(0,Math.ceil((room.startsAt + TALK_DURATION_MS - Date.now()) / 1000)); }
-    function talkClock(room) { const seconds=talkSecondsLeft(room); return `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; }
-    function talkEnded(room) { return isLive(room) && talkSecondsLeft(room) === 0; }
+    const initials = name => name.split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase();
+    const active = room => room && room.topic;
+    const isLive = room => Date.now() >= room.startsAt;
+    const timeLabel = room => { const seconds = Math.max(0, Math.ceil((room.startsAt - Date.now()) / 1000)); return seconds === 0 ? 'LIVE' : `starts in ${Math.ceil(seconds / 60)} min`; };
+    const talkSecondsLeft = room => Math.max(0, Math.ceil((room.startsAt + TALK_DURATION_MS - Date.now()) / 1000));
+    const talkClock = room => { const seconds = talkSecondsLeft(room); return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; };
+    const talkEnded = room => isLive(room) && talkSecondsLeft(room) === 0;
+
+    async function api(path, options = {}) {
+      const response = await fetch(`${API_ENDPOINT}${path}`, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'The shared room service could not be reached.');
+      return data;
+    }
+
+    async function refreshRooms() {
+      try {
+        const data = await api('/rooms');
+        rooms = [];
+        data.rooms.forEach(room => {
+          rooms[room.circle] = {
+            topic: room.topic,
+            startsAt: room.startsAt,
+            members: room.members.map(member => ({ ...member, mine: member.id === memberId, hand: false }))
+          };
+        });
+        if (openIndex !== null && !rooms[openIndex]) backHome();
+        renderGrid();
+        if (openIndex !== null) updateRoom();
+      } catch (error) { console.error(error); }
+    }
+
     function renderGrid() {
-      const grid=$('circleGrid'); grid.innerHTML='';
-      for(let i=0;i<9;i++) { const room=rooms[i]; const button=document.createElement('button'); button.className='room-circle'+(active(room)?' active':'')+(active(room)&&isLive(room)?' live':'');
-        button.innerHTML=active(room)?`<span class="circle-center">${room.topic}<small>${timeLabel(room)} · ${room.members.length}/12</small></span>`:'<span class="circle-center">＋<small>Reserve a circle</small></span>';
-        button.onclick=()=>active(room)?openRoom(i):reserve(i); const caption=document.createElement('div'); caption.className='circle-caption'; caption.innerHTML=active(room)?`<strong>${room.topic}</strong>${room.members.length} signed up`:'Available public room'; const card=document.createElement('div'); card.className='circle-card'; card.append(button,caption); grid.append(card);
+      const grid = $('circleGrid'); grid.innerHTML = '';
+      for (let i = 0; i < 9; i++) {
+        const room = rooms[i], button = document.createElement('button');
+        button.className = 'room-circle' + (active(room) ? ' active' : '') + (active(room) && isLive(room) ? ' live' : '');
+        button.innerHTML = active(room) ? `<span class="circle-center">${room.topic}<small>${timeLabel(room)} · ${room.members.length}/12</small></span>` : '<span class="circle-center">＋<small>Reserve a circle</small></span>';
+        button.onclick = () => active(room) ? openRoom(i) : reserve(i);
+        const caption = document.createElement('div'); caption.className = 'circle-caption';
+        caption.innerHTML = active(room) ? `<strong>${room.topic}</strong>${room.members.length} signed up` : 'Available public room';
+        const card = document.createElement('div'); card.className = 'circle-card'; card.append(button, caption); grid.append(card);
       }
     }
-    function reserve(index) { reservingIndex=index; $('reserveModal').classList.add('open'); $('reserveModal').setAttribute('aria-hidden','false'); $('hostName').focus(); }
-    function closeModal() { $('reserveModal').classList.remove('open'); $('reserveModal').setAttribute('aria-hidden','true'); }
-    $('cancelReserve').onclick=closeModal;
-    $('reserveForm').onsubmit=e=>{ e.preventDefault(); const name=$('hostName').value.trim(), topic=$('topic').value.trim(), minutes=Number($('when').value); rooms[reservingIndex]={topic,startsAt:Date.now()+minutes*60000,members:[{name,role:'Host',mine:true,hand:false}]}; save(); closeModal(); openRoom(reservingIndex); e.target.reset(); };
-    function openRoom(index) { openIndex=index; talkHasEnded=false; const room=rooms[index]; $('home').style.display='none'; $('roomView').classList.add('show'); $('roomTitle').textContent=room.topic; updateRoom(); }
-    function updateRoom() { const room=rooms[openIndex]; if(!room) return backHome(); if(talkEnded(room)) return finishTalk(); const live=isLive(room); $('roomState').textContent=live?`LIVE · ${talkClock(room)} LEFT`:timeLabel(room).toUpperCase(); $('speakerName').textContent=live?`It’s ${room.members[0].name}’s turn to talk`:`${room.members[0].name} is hosting the lobby`; $('countText').textContent=`${room.members.length} / 12`; const me=room.members.find(m=>m.mine); $('micButton').disabled=false; $('speakButton').disabled=false; $('joinButton').style.display=me?'none':'inline-block'; $('handButton').style.display=me?'inline-block':'none'; $('leaveButton').style.display=me?'inline-block':'none'; $('speakButton').style.display=me?'inline-block':'none'; $('handButton').textContent=me&&me.hand?'Hand raised ✓':'Raise hand'; updateAudioUI(me);
-      const roster=$('rosterList'); roster.innerHTML=''; room.members.forEach((member,n)=>{ const status=n===0?'Speaking':member.hand?'Hand raised':'Listening'; const div=document.createElement('div'); div.className='member'; div.innerHTML=`<div class="avatar">${initials(member.name)}</div><div class="member-text">${member.name}${member.mine?' (You)':''}<small>${member.role}${n===0?' · Room creator':''}</small></div><span class="member-state">${status}</span>`; roster.append(div); });
-      const queued=room.members.filter(m=>m.hand); $('queueContent').innerHTML=queued.length?queued.map(m=>`<div class="queue-item"><div class="avatar">${initials(m.name)}</div><div class="member-text">${m.name}<small>Waiting to speak</small></div></div>`).join(''):'No hands raised yet.';
+
+    function reserve(index) { reservingIndex = index; $('hostName').value = localStorage.getItem(NAME_KEY) || ''; $('reserveModal').classList.add('open'); $('hostName').focus(); }
+    function closeModal() { $('reserveModal').classList.remove('open'); }
+    $('cancelReserve').onclick = closeModal;
+    $('reserveForm').onsubmit = async event => {
+      event.preventDefault();
+      const name = $('hostName').value.trim(), topic = $('topic').value.trim(), minutes = Number($('when').value);
+      try {
+        localStorage.setItem(NAME_KEY, name);
+        await api('/rooms', { method: 'POST', body: JSON.stringify({ circle: reservingIndex, topic, name, memberId, startsAt: Date.now() + minutes * 60000 }) });
+        closeModal(); event.target.reset(); await refreshRooms(); openRoom(reservingIndex);
+      } catch (error) { alert(error.message); await refreshRooms(); }
+    };
+
+    function openRoom(index) { openIndex = index; talkHasEnded = false; const room = rooms[index]; if (!room) return; $('home').style.display = 'none'; $('roomView').classList.add('show'); $('roomTitle').textContent = room.topic; updateRoom(); }
+    function updateRoom() {
+      const room = rooms[openIndex]; if (!room) return backHome(); if (talkEnded(room)) return finishTalk();
+      const live = isLive(room), host = room.members.find(member => member.role === 'Host') || room.members[0], me = room.members.find(member => member.mine);
+      $('roomState').textContent = live ? `LIVE · ${talkClock(room)} LEFT` : timeLabel(room).toUpperCase();
+      $('speakerName').textContent = live ? `It’s ${host.name}’s turn to talk` : `${host.name} is hosting the lobby`;
+      $('countText').textContent = `${room.members.length} / 12`;
+      $('joinButton').style.display = me ? 'none' : 'inline-block'; $('handButton').style.display = me ? 'inline-block' : 'none'; $('leaveButton').style.display = me ? 'inline-block' : 'none'; $('speakButton').style.display = me ? 'inline-block' : 'none';
+      $('handButton').textContent = me && me.hand ? 'Hand raised ✓' : 'Raise hand'; updateAudioUI(me);
+      const roster = $('rosterList'); roster.innerHTML = '';
+      room.members.forEach(member => { const isHost = member.role === 'Host', status = isHost ? 'Speaking' : member.hand ? 'Hand raised' : 'Listening'; const div = document.createElement('div'); div.className = 'member'; div.innerHTML = `<div class="avatar">${initials(member.name)}</div><div class="member-text">${member.name}${member.mine ? ' (You)' : ''}<small>${member.role}${isHost ? ' · Room creator' : ''}</small></div><span class="member-state">${status}</span>`; roster.append(div); });
+      const queued = room.members.filter(member => member.hand); $('queueContent').innerHTML = queued.length ? queued.map(member => `<div class="queue-item"><div class="avatar">${initials(member.name)}</div><div class="member-text">${member.name}<small>Waiting to speak</small></div></div>`).join('') : 'No hands raised yet.';
     }
-    $('joinButton').onclick=async()=>{ const name=prompt('What name should appear in this room?'); if(!name||!name.trim())return; const room=rooms[openIndex]; if(room.members.length>=12)return alert('This circle is full.'); room.members.push({name:name.trim().slice(0,24),role:'Listener',mine:true,hand:false}); save(); updateRoom(); renderGrid(); await connectAudio(); };
-    $('handButton').onclick=()=>{ const me=rooms[openIndex].members.find(m=>m.mine); me.hand=!me.hand; save(); updateRoom(); };
-    $('leaveButton').onclick=async()=>{ const room=rooms[openIndex], myIndex=room.members.findIndex(m=>m.mine); if(myIndex===0){ if(!confirm('Leaving as host will close this circle for everyone. Continue?'))return; rooms[openIndex]=null; } else room.members.splice(myIndex,1); await disconnectAudio(); save(); renderGrid(); backHome(); };
-    $('reportButton').onclick=()=>alert('Thanks. In a real iRamble app, this would send a report to moderators.');
-    function updateAudioUI(me) { const button=$('speakButton'), mic=$('micButton'); if(!me) return; button.textContent=microphoneOn?'Mute microphone':'Start speaking 🎙'; mic.classList.toggle('on',microphoneOn); mic.setAttribute('aria-label',microphoneOn?'Mute microphone':'Start speaking'); if(microphoneOn) $('speakerName').textContent=`It’s ${me.name}’s turn to talk`; $('audioStatus').textContent=microphoneOn?`You are live — people in this circle can hear ${me.name}.`:(audioConnected?'You are connected. Tap the microphone when it is your turn.':'Join audio, then tap the microphone when it is your turn.'); }
-    async function connectAudio() { const room=rooms[openIndex], me=room && room.members.find(m=>m.mine); if(!me || audioConnected) return; if(!window.LivekitClient) throw new Error('LiveKit audio library did not load.'); $('audioStatus').textContent='Joining live audio…'; audioIdentity=audioIdentity || `${me.name.slice(0,14)}-${crypto.randomUUID().slice(0,8)}`; const tokenResponse=await fetch(TOKEN_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identity:audioIdentity,room:`iramble-circle-${openIndex}`})}); const connection=await tokenResponse.json(); if(!tokenResponse.ok) throw new Error(connection.error || 'Could not get an audio-room token.'); livekitRoom=new LivekitClient.Room(); livekitRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track)=>{ if(track.kind===LivekitClient.Track.Kind.Audio){ const audio=track.attach(); audio.autoplay=true; audio.dataset.livekitAudio='true'; document.body.appendChild(audio); } }); livekitRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed,(track)=>{ track.detach().forEach(element=>element.remove()); }); await livekitRoom.connect(connection.url,connection.token); await livekitRoom.startAudio(); audioConnected=true; updateAudioUI(me); }
-    async function toggleMicrophone() { const room=rooms[openIndex], me=room && room.members.find(m=>m.mine); if(!me) return alert('Join this room before using the microphone.'); try { if(!audioConnected) await connectAudio(); await livekitRoom.localParticipant.setMicrophoneEnabled(!microphoneOn); microphoneOn=!microphoneOn; updateAudioUI(me); } catch(error) { console.error(error); $('speakerName').textContent='Click the lock icon beside the address bar → Microphone → Allow, then refresh the page.'; $('audioStatus').textContent='Microphone permission is needed before you can speak.'; alert('Please allow microphone permission in your browser, then tap the microphone again.'); } }
-    async function disconnectAudio() { if(livekitRoom) livekitRoom.disconnect(); document.querySelectorAll('[data-livekit-audio]').forEach(element=>element.remove()); livekitRoom=null; audioConnected=false; microphoneOn=false; audioIdentity=null; }
-    async function finishTalk() { if(talkHasEnded) return; talkHasEnded=true; $('roomState').textContent='TALK ENDED'; $('speakerName').textContent='This 15-minute talk has ended'; $('audioStatus').textContent='Thanks for rambling together.'; $('micButton').disabled=true; $('speakButton').disabled=true; await disconnectAudio(); setTimeout(()=>{ if(openIndex!==null){ rooms[openIndex]=null; save(); backHome(); } },1800); }
-    $('micButton').onclick=toggleMicrophone;
-    $('speakButton').onclick=toggleMicrophone;
-    function backHome(){ $('roomView').classList.remove('show'); $('home').style.display='block'; openIndex=null; renderGrid(); }
-    $('backButton').onclick=backHome;
-    renderGrid(); setInterval(()=>{ if(openIndex!==null) updateRoom(); renderGrid(); },1000);
+
+    $('joinButton').onclick = async () => {
+      const name = prompt('What name should appear in this room?', localStorage.getItem(NAME_KEY) || ''); if (!name || !name.trim()) return;
+      try { localStorage.setItem(NAME_KEY, name.trim()); await api(`/rooms/${openIndex}/join`, { method: 'POST', body: JSON.stringify({ name: name.trim(), memberId }) }); await refreshRooms(); await connectAudio(); } catch (error) { alert(error.message); }
+    };
+    $('handButton').onclick = () => { const me = rooms[openIndex]?.members.find(member => member.mine); if (me) { me.hand = !me.hand; updateRoom(); } };
+    $('leaveButton').onclick = async () => {
+      const me = rooms[openIndex]?.members.find(member => member.mine); if (!me) return;
+      if (me.role === 'Host' && !confirm('Leaving as host will close this circle for everyone. Continue?')) return;
+      try { await api(`/rooms/${openIndex}/members/${memberId}`, { method: 'DELETE' }); await disconnectAudio(); backHome(); await refreshRooms(); } catch (error) { alert(error.message); }
+    };
+    $('reportButton').onclick = () => alert('Thanks. In a real iRamble app, this would send a report to moderators.');
+
+    function updateAudioUI(me) { if (!me) return; $('speakButton').textContent = microphoneOn ? 'Mute microphone' : 'Start speaking 🎙'; $('micButton').classList.toggle('on', microphoneOn); $('micButton').setAttribute('aria-label', microphoneOn ? 'Mute microphone' : 'Start speaking'); if (microphoneOn) $('speakerName').textContent = `It’s ${me.name}’s turn to talk`; $('audioStatus').textContent = microphoneOn ? `You are live — people in this circle can hear ${me.name}.` : audioConnected ? 'You are connected. Tap the microphone when it is your turn.' : 'Join audio, then tap the microphone when it is your turn.'; }
+    async function connectAudio() { const room = rooms[openIndex], me = room?.members.find(member => member.mine); if (!me || audioConnected) return; if (!window.LivekitClient) throw new Error('LiveKit audio library did not load.'); $('audioStatus').textContent = 'Joining live audio…'; audioIdentity = audioIdentity || `${me.name.slice(0, 14)}-${crypto.randomUUID().slice(0, 8)}`; const connection = await api('/token', { method: 'POST', body: JSON.stringify({ identity: audioIdentity, room: `iramble-circle-${openIndex}` }) }); livekitRoom = new LivekitClient.Room(); livekitRoom.on(LivekitClient.RoomEvent.TrackSubscribed, track => { if (track.kind === LivekitClient.Track.Kind.Audio) { const audio = track.attach(); audio.autoplay = true; audio.dataset.livekitAudio = 'true'; document.body.appendChild(audio); } }); livekitRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed, track => track.detach().forEach(element => element.remove())); await livekitRoom.connect(connection.url, connection.token); await livekitRoom.startAudio(); audioConnected = true; updateAudioUI(me); }
+    async function toggleMicrophone() { const me = rooms[openIndex]?.members.find(member => member.mine); if (!me) return alert('Join this room before using the microphone.'); try { if (!audioConnected) await connectAudio(); await livekitRoom.localParticipant.setMicrophoneEnabled(!microphoneOn); microphoneOn = !microphoneOn; updateAudioUI(me); } catch (error) { console.error(error); $('speakerName').textContent = 'Click the lock icon beside the address bar → Microphone → Allow, then refresh the page.'; $('audioStatus').textContent = 'Microphone permission is needed before you can speak.'; } }
+    async function disconnectAudio() { if (livekitRoom) livekitRoom.disconnect(); document.querySelectorAll('[data-livekit-audio]').forEach(element => element.remove()); livekitRoom = null; audioConnected = false; microphoneOn = false; audioIdentity = null; }
+    async function finishTalk() { if (talkHasEnded) return; talkHasEnded = true; $('roomState').textContent = 'TALK ENDED'; $('speakerName').textContent = 'This 15-minute talk has ended'; $('audioStatus').textContent = 'Thanks for rambling together.'; await disconnectAudio(); setTimeout(async () => { backHome(); await refreshRooms(); }, 1800); }
+    $('micButton').onclick = toggleMicrophone; $('speakButton').onclick = toggleMicrophone;
+    function backHome() { $('roomView').classList.remove('show'); $('home').style.display = 'block'; openIndex = null; renderGrid(); }
+    $('backButton').onclick = backHome;
+    renderGrid(); refreshRooms(); setInterval(() => { if (openIndex !== null) updateRoom(); renderGrid(); }, 1000); setInterval(refreshRooms, 4000);
   </script>
 </body>
 </html>
