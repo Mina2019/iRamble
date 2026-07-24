@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>iRamble owner moderation</title>
+  <style>
+    :root { --ink:#1d2638; --purple:#6d4aff; --line:#e3e1f0; --muted:#6d7181; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; font-family:Inter,system-ui,sans-serif; color:var(--ink); background:#f8f7ff; }
+    main { width:min(720px,calc(100% - 32px)); margin:54px auto; }
+    h1 { letter-spacing:-.05em; margin-bottom:8px; }
+    p { color:var(--muted); line-height:1.5; }
+    .panel { margin-top:24px; padding:22px; border:1px solid var(--line); border-radius:18px; background:#fff; }
+    label { display:block; font-size:.88rem; font-weight:800; margin-bottom:8px; }
+    input { width:100%; padding:12px; border:1px solid var(--line); border-radius:10px; font:inherit; }
+    button { border:0; border-radius:10px; padding:11px 14px; font:inherit; font-weight:800; cursor:pointer; }
+    .primary { margin-top:12px; background:var(--purple); color:#fff; }
+    .delete { color:#b92344; background:#fff0f3; }
+    .room { display:flex; align-items:center; gap:14px; padding:16px 0; border-bottom:1px solid var(--line); }
+    .room:last-child { border:0; }
+    .room-info { flex:1; min-width:0; }
+    .room-info strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .room-info small { color:var(--muted); }
+    .hidden { display:none; }
+    #message { min-height:20px; font-size:.9rem; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>iRamble owner moderation</h1>
+    <p>Use this private page to remove a room that is inappropriate. Your password is never saved in this page.</p>
+    <section class="panel" id="login">
+      <label for="password">Owner password</label>
+      <input id="password" type="password" autocomplete="current-password">
+      <button class="primary" id="open">Open moderation</button>
+    </section>
+    <section class="panel hidden" id="roomsPanel">
+      <p id="message"></p>
+      <div id="rooms"></div>
+    </section>
+  </main>
+  <script>
+    const API = 'https://iramble-token.hassanvandmina.workers.dev';
+    let password = '';
+    const $ = id => document.getElementById(id);
+    async function request(path, options = {}) {
+      const response = await fetch(`${API}${path}`, { headers: { 'X-Admin-Password': password, ...(options.headers || {}) }, ...options });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Request failed.');
+      return data;
+    }
+    async function loadRooms() {
+      const data = await fetch(`${API}/rooms`).then(r => r.json());
+      const list = $('rooms'); list.innerHTML = '';
+      if (!data.rooms?.length) { list.textContent = 'There are no active rooms.'; return; }
+      data.rooms.forEach(room => {
+        const row = document.createElement('div'); row.className = 'room';
+        row.innerHTML = `<div class="room-info"><strong>${room.topic}</strong><small>Circle ${room.circle + 1} · Host: ${room.hostName} · ${room.members.length} participants</small></div><button class="delete">Delete room</button>`;
+        row.querySelector('button').onclick = async () => {
+          if (!confirm(`Delete “${room.topic}” for everyone?`)) return;
+          try { $('message').textContent = 'Removing room…'; await request(`/admin/rooms/${room.circle}`, { method:'DELETE' }); $('message').textContent = 'Room removed.'; await loadRooms(); }
+          catch (error) { $('message').textContent = error.message; }
+        };
+        list.append(row);
+      });
+    }
+    $('open').onclick = async () => {
+      password = $('password').value;
+      if (!password) return;
+      try { $('message').textContent = 'Loading rooms…'; $('login').classList.add('hidden'); $('roomsPanel').classList.remove('hidden'); await loadRooms(); $('message').textContent = ''; }
+      catch (error) { $('login').classList.remove('hidden'); $('roomsPanel').classList.add('hidden'); alert('Password was not accepted.'); }
+    };
+  </script>
+</body>
+</html>
