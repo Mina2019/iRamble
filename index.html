@@ -56,6 +56,7 @@
     @keyframes micPulse { 50% { box-shadow:0 0 0 15px #f45b9c00; } }
     .stage strong { display:block; margin-top:10px; }
     .stage p { margin:4px 15px; color:#e6e2ff; font-size:.9rem; }
+    .permission-hint { max-width:420px; margin:12px auto 0 !important; padding-top:10px; border-top:1px solid #ffffff35; font-size:.78rem !important; }
     .room-controls { display:flex; flex-wrap:wrap; gap:10px; }
     .danger { border:0; border-radius:11px; padding:11px 15px; color:#bd3050; background:#fff0f3; font-weight:800; }
     .queue { margin-top:24px; padding-top:20px; border-top:1px solid var(--line); }
@@ -84,7 +85,7 @@
           <span class="state" id="roomState">LIVE NOW</span>
           <h1 class="room-title" id="roomTitle"></h1>
           <p class="room-description" id="roomDescription">This is a public room. The host can invite people from the hand queue to speak.</p>
-          <div class="stage"><div><button class="mic" id="micButton" type="button" aria-label="Start speaking">🎙</button><strong id="speakerName">Room creator is speaking</strong><p id="audioStatus">Tap the microphone when it is your turn to talk.</p></div></div>
+          <div class="stage"><div><button class="mic" id="micButton" type="button" aria-label="Start speaking">🎙</button><strong id="speakerName">Room creator is speaking</strong><p id="audioStatus">Tap the microphone when it is your turn to talk.</p><p class="permission-hint">Click the lock icon beside the address bar → Microphone → Allow, then refresh the page.</p></div></div>
           <div class="room-controls"><button class="primary" id="handButton">Raise hand</button><button class="soft" id="joinButton">Join room</button><button class="primary" id="speakButton">Start speaking 🎙</button><button class="danger" id="leaveButton">Leave room</button><button class="soft" id="reportButton">Report</button></div>
           <div class="queue"><h3>Speaker queue</h3><div id="queueContent">No hands raised yet.</div></div>
         </article>
