@@ -1,43 +1,128 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>iRamble</title><style>
-:root{--ink:#203033;--paper:#f5f3ef;--sea:#dcebea;--teal:#247b77;--dark:#174d50;--line:#c1cecc;--rose:#a44336}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px system-ui,-apple-system,Segoe UI,sans-serif}main{max-width:1020px;margin:auto;padding:25px 18px 42px}h1{margin:0;font-family:Georgia,serif;font-size:clamp(2.4rem,7vw,4.4rem);color:var(--dark)}.sub{margin:.35rem 0 22px;color:#566568}.rooms{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.room{border:0;background:none;padding:0;cursor:pointer;text-align:center;color:inherit}.room svg{display:block;width:100%;max-width:245px;margin:auto;filter:drop-shadow(0 7px 8px rgba(25,50,48,.08))}.room:focus-visible{outline:3px solid #6da6a1;outline-offset:5px;border-radius:50%}.help{text-align:center;color:#596968;margin:22px 0 0}.screen{max-width:720px;margin:auto}.back{border:0;background:none;padding:0;color:#376c68;font:inherit;font-weight:750;cursor:pointer}.card{margin-top:16px;padding:clamp(21px,5vw,38px);border:1px solid #d8dfdc;border-radius:24px;background:#fffdf9;box-shadow:0 12px 35px rgba(25,50,48,.08)}.pill{display:inline-block;border-radius:30px;background:var(--sea);padding:5px 10px;font-size:.82rem;font-weight:800;color:#245a58}.card h2{font-family:Georgia,serif;font-size:clamp(2rem,6vw,3.4rem);margin:14px 0 5px}.card p{color:#546262;line-height:1.5}.row{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin:24px 0}.stat{padding:15px;border-radius:15px;background:#f0f5f4}.stat strong{display:block;font-size:1.35rem}.actions{display:flex;flex-wrap:wrap;gap:10px}.action{border:0;border-radius:11px;padding:11px 14px;background:var(--dark);color:#fff;font:inherit;font-weight:750;cursor:pointer}.action.light{background:#e3ecea;color:var(--ink)}.queue{margin-top:22px;padding:15px;border-radius:15px;background:#f7f5f0}.queue h3{margin:0 0 8px}.modal{position:fixed;inset:0;display:none;place-items:center;padding:16px;background:rgba(20,35,35,.48)}.modal.open{display:grid}.dialog{width:min(460px,100%);padding:24px;border-radius:20px;background:#fffdf9;box-shadow:0 18px 45px rgba(0,0,0,.2)}.dialog h2{margin:0 0 16px;font-family:Georgia,serif}.dialog label{display:block;margin:13px 0 5px;font-weight:700}.dialog input{width:100%;padding:11px;border:1px solid #bdcbc8;border-radius:9px;font:inherit}.dialog .actions{margin-top:20px}@media(max-width:620px){main{padding:20px 12px}.rooms{grid-template-columns:repeat(2,1fr);gap:12px}.row{grid-template-columns:1fr}}
-</style></head><body><main><section id="home"><h1>iRamble</h1><p class="sub">Choose an open slice to reserve a seat. Click the center of an active circle to enter its room.</p><div class="rooms" id="rooms"></div><p class="help">Public conversations · 1 host + 11 listener seats · rooms start even when not full</p></section><section id="room-screen" class="screen" hidden></section></main><div class="modal" id="modal"><form class="dialog" id="form"><h2>Reserve a conversation</h2><label for="topic">What would you like to talk about?</label><input id="topic" required maxlength="45" placeholder="For example: How do you stay motivated?"><label for="minutes">Start in how many minutes?</label><input id="minutes" type="number" min="1" max="240" value="15" required><div class="actions"><button class="action" type="submit">Reserve circle</button><button class="action light" type="button" id="cancel">Cancel</button></div></form></div><script>
-const saved=JSON.parse(localStorage.getItem('iramble-rooms')||'null');const rooms=saved||Array(9).fill(null);let pending=null,active=null,raised=false;
-const $=s=>document.querySelector(s);function persist(){localStorage.setItem('iramble-rooms',JSON.stringify(rooms))}function esc(v){return v.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}function wedge(i,fill,opacity){const a=(-90+i*30)*Math.PI/180,b=(-90+(i+1)*30)*Math.PI/180,x1=120+104*Math.cos(a),y1=120+104*Math.sin(a),x2=120+104*Math.cos(b),y2=120+104*Math.sin(b);return `<path d="M120 120 L${x1.toFixed(1)} ${y1.toFixed(1)} A104 104 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}Z" fill="${fill}" opacity="${opacity}" stroke="#f5f3ef" stroke-width="2"/>`}function remaining(room){return Math.max(0,room.starts-Date.now())}function svg(room,i){if(!room)return `<svg viewBox="0 0 240 240" aria-label="Empty conversation circle ${i+1}"><circle cx="120" cy="120" r="104" fill="#fffdf9" stroke="#c1cecc" stroke-width="2"/><text x="120" y="110" text-anchor="middle" font-size="34" fill="#60706e">+</text><text x="120" y="145" text-anchor="middle" font-size="14" font-weight="700" fill="#526260">Reserve a talk</text></svg>`;let sec=remaining(room)/1000,fade=.28+.72*Math.min(1,sec/1800),parts=[];for(let s=0;s<12;s++)parts.push(wedge(s,s===0?'#174d50':s<room.seats?'#247b77':'#fffdf9',fade));let m=Math.floor(sec/60),ss=Math.floor(sec%60),status=sec?`${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`:'LIVE';return `<svg viewBox="0 0 240 240" aria-label="${esc(room.topic)}, ${room.seats} seats filled">${parts.join('')}<circle cx="120" cy="120" r="61" fill="#f5f3ef"/><text x="120" y="105" text-anchor="middle" font-size="13" font-weight="700" fill="#203033">${esc(room.topic)}</text><text x="120" y="130" text-anchor="middle" font-size="12" font-weight="800" fill="#a44336">${status}</text><text x="120" y="151" text-anchor="middle" font-size="11" fill="#526260">${room.seats}/12 seats</text></svg>`}function render(){const box=$('#rooms');box.innerHTML=rooms.map((r,i)=>`<button class="room" data-i="${i}" aria-label="${r?'Open '+r.topic:'Reserve conversation circle'}">${svg(r,i)}</button>`).join('');box.querySelectorAll('.room').forEach(b=>b.onclick=e=>clickRoom(+b.dataset.i,e))}function clickRoom(i,event){const room=rooms[i];if(!room){pending=i;$('#modal').classList.add('open');return}const rect=event.currentTarget.getBoundingClientRect(),x=(event.clientX-rect.left)/rect.width*240,y=(event.clientY-rect.top)/rect.height*240,dist=Math.hypot(x-120,y-120);if(dist<64){openRoom(i);return}if(room.seats<12){room.seats++;persist();render()}}function openRoom(i){active=i;$('#home').hidden=true;let r=rooms[i],sec=Math.floor(remaining(r)/1000),live=sec===0,min=Math.floor(sec/60),s=sec%60;$('#room-screen').hidden=false;$('#room-screen').innerHTML=`<button class="back">← Back to circles</button><article class="card"><span class="pill">${live?'Live now':'Lobby open'}</span><h2>${esc(r.topic)}</h2><p>${live?'The conversation is live. The host can bring listeners up from the hand queue.':'This public room starts in '+String(min).padStart(2,'0')+':'+String(s).padStart(2,'0')+'. You have a listener seat in the lobby.'}</p><div class="row"><div class="stat"><span>Host</span><strong>Room creator</strong></div><div class="stat"><span>Participants</span><strong>${r.seats} / 12</strong></div></div><div class="actions"><button class="action" id="hand">${raised?'Hand raised ✓':'Raise hand'}</button><button class="action light" id="leave">Leave room</button><button class="action light" id="report">Report</button></div><section class="queue"><h3>Speaker queue</h3><p>${raised?'You are next in line to speak.':'No one is waiting to speak. Raise your hand to join the queue.'}</p></section></article>`;$('.back').onclick=closeRoom;$('#hand').onclick=()=>{raised=!raised;openRoom(i)};$('#leave').onclick=closeRoom;$('#report').onclick=()=>alert('Report saved in this prototype. A real app would send it to moderators.')}function closeRoom(){$('#room-screen').hidden=true;$('#home').hidden=false;active=null;raised=false}$('#form').onsubmit=e=>{e.preventDefault();rooms[pending]={topic:$('#topic').value.trim(),starts:Date.now()+(+$('#minutes').value*60000),seats:1};persist();$('#modal').classList.remove('open');$('#form').reset();render()};$('#cancel').onclick=()=>{$('#modal').classList.remove('open');pending=null};setInterval(()=>{render();if(active!==null)openRoom(active)},1000);render();
-</script>
-<script>
-  // Add local seat ownership to the GitHub Pages prototype. In a real app,
-  // the server would track the exact participant and slice for every person.
-  const originalOpenRoom = openRoom;
-  clickRoom = function (i, event) {
-    const room = rooms[i];
-    if (!room) { pending = i; $('#modal').classList.add('open'); return; }
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width * 240;
-    const y = (event.clientY - rect.top) / rect.height * 240;
-    if (Math.hypot(x - 120, y - 120) < 64) { openRoom(i); return; }
-    if (room.seats < 12 && room.mySeat === undefined) {
-      room.mySeat = room.seats;
-      room.seats += 1;
-      persist(); render();
-    }
-  };
-  openRoom = function (i) {
-    originalOpenRoom(i);
-    $('#leave').onclick = () => {
-      const room = rooms[i];
-      if (room && room.mySeat > 0) {
-        room.seats -= 1;
-        delete room.mySeat;
-      } else if (room && room.mySeat === 0) {
-        rooms[i] = null;
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>iRamble</title>
+  <style>
+    :root { --ink:#1d2638; --purple:#6d4aff; --pink:#f45b9c; --paper:#f8f7ff; --line:#e3e1f0; --muted:#6d7181; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; font-family:Inter, ui-sans-serif, system-ui, sans-serif; color:var(--ink); background:radial-gradient(circle at 10% 0,#eae4ff 0,transparent 30%),var(--paper); }
+    button,input,select { font:inherit; }
+    button { cursor:pointer; }
+    .shell { width:min(1120px,calc(100% - 32px)); margin:auto; }
+    header { display:flex; justify-content:space-between; align-items:center; padding:28px 0 18px; gap:16px; }
+    .brand { font-size:1.6rem; font-weight:900; letter-spacing:-.06em; }
+    .brand span { color:var(--purple); }
+    .tag { color:var(--muted); font-size:.92rem; }
+    .intro { max-width:650px; margin:25px auto 28px; text-align:center; }
+    h1 { font-size:clamp(2rem,5vw,3.6rem); letter-spacing:-.07em; margin:0 0 10px; }
+    .intro p { margin:0; color:var(--muted); line-height:1.55; }
+    .circle-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:24px; padding-bottom:42px; }
+    .circle-card { min-width:0; }
+    .room-circle { position:relative; aspect-ratio:1; border:0; border-radius:50%; width:100%; color:var(--ink); box-shadow:0 16px 35px #443d7a1b; overflow:hidden; transition:transform .18s,box-shadow .18s; background:conic-gradient(#ddd 0 30deg,#f6f5fb 30deg 60deg,#ddd 60deg 90deg,#f6f5fb 90deg 120deg,#ddd 120deg 150deg,#f6f5fb 150deg 180deg,#ddd 180deg 210deg,#f6f5fb 210deg 240deg,#ddd 240deg 270deg,#f6f5fb 270deg 300deg,#ddd 300deg 330deg,#f6f5fb 330deg); }
+    .room-circle:hover { transform:translateY(-4px); box-shadow:0 20px 42px #443d7a2b; }
+    .room-circle.active { background:conic-gradient(var(--purple) 0 30deg,#ece8ff 30deg 60deg,var(--pink) 60deg 90deg,#ece8ff 90deg 120deg,#8fdac8 120deg 150deg,#ece8ff 150deg 180deg,#6a9cff 180deg 210deg,#ece8ff 210deg 240deg,#f5bb52 240deg 270deg,#ece8ff 270deg 300deg,#bf8af4 300deg 330deg,#ece8ff 330deg); }
+    .room-circle.active.live { animation:breathe 2.3s infinite alternate; }
+    @keyframes breathe { to { box-shadow:0 0 0 12px #6d4aff18,0 18px 38px #443d7a2d; } }
+    .circle-center { position:absolute; inset:24%; display:grid; place-items:center; text-align:center; padding:7px; border-radius:50%; background:#fff; box-shadow:inset 0 0 0 1px #e9e7f1; font-weight:850; line-height:1.08; font-size:clamp(.76rem,1.8vw,1rem); }
+    .circle-center small { display:block; margin-top:5px; font-size:.7em; font-weight:650; color:var(--muted); }
+    .circle-caption { text-align:center; min-height:42px; padding-top:9px; font-size:.84rem; color:var(--muted); }
+    .circle-caption strong { display:block; color:var(--ink); font-size:.92rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .helper { text-align:center; margin:0 0 25px; color:var(--muted); font-size:.9rem; }
+    .modal { position:fixed; inset:0; z-index:5; display:none; place-items:center; padding:18px; background:#1d26385c; }
+    .modal.open { display:grid; }
+    .dialog { width:min(460px,100%); background:#fff; border-radius:22px; padding:26px; box-shadow:0 24px 70px #11152955; }
+    .dialog h2 { margin:0 0 8px; letter-spacing:-.04em; }
+    .dialog p { margin:0 0 20px; color:var(--muted); line-height:1.5; }
+    label { display:block; font-weight:750; font-size:.88rem; margin:15px 0 7px; }
+    input,select { width:100%; border:1px solid var(--line); border-radius:11px; padding:12px; background:#fff; }
+    .actions { display:flex; gap:10px; justify-content:flex-end; margin-top:22px; }
+    .primary,.soft { border:0; border-radius:11px; padding:11px 15px; font-weight:800; }
+    .primary { color:white; background:var(--purple); }
+    .soft { color:var(--ink); background:#eeecf7; }
+    .room-view { display:none; padding:16px 0 38px; }
+    .room-view.show { display:block; }
+    .back { border:0; background:none; color:var(--purple); padding:0; font-weight:800; }
+    .live-layout { display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:22px; margin-top:18px; }
+    .panel { background:#fff; border:1px solid #e9e7f1; border-radius:20px; padding:26px; box-shadow:0 12px 28px #443d7a0c; }
+    .state { display:inline-block; color:#218666; background:#ddf8ee; padding:5px 9px; border-radius:99px; font-size:.76rem; font-weight:850; }
+    .room-title { margin:12px 0 5px; font-size:clamp(2rem,4vw,3.1rem); letter-spacing:-.065em; }
+    .room-description { color:var(--muted); line-height:1.55; margin:0; }
+    .stage { min-height:210px; display:grid; place-items:center; text-align:center; margin:26px 0; border-radius:18px; color:white; background:radial-gradient(circle at 50% 30%,#957eff,transparent 31%),linear-gradient(135deg,#282147,#4b3396); }
+    .mic { display:grid; place-items:center; width:72px; height:72px; border-radius:50%; background:#ffffff20; border:1px solid #ffffff42; font-size:2rem; margin:auto; }
+    .stage strong { display:block; margin-top:10px; }
+    .stage p { margin:4px 15px; color:#e6e2ff; font-size:.9rem; }
+    .room-controls { display:flex; flex-wrap:wrap; gap:10px; }
+    .danger { border:0; border-radius:11px; padding:11px 15px; color:#bd3050; background:#fff0f3; font-weight:800; }
+    .queue { margin-top:24px; padding-top:20px; border-top:1px solid var(--line); }
+    .queue h3,.roster h3 { margin:0 0 12px; font-size:1rem; }
+    .queue-item,.member { display:flex; align-items:center; gap:10px; padding:11px 0; border-bottom:1px solid #f0eff5; }
+    .avatar { flex:0 0 auto; display:grid; place-items:center; width:35px; height:35px; border-radius:50%; color:white; background:var(--purple); font-size:.78rem; font-weight:850; }
+    .member-text { min-width:0; flex:1; font-weight:800; }
+    .member-text small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:.76rem; font-weight:600; margin-top:1px; }
+    .member-state { font-size:.72rem; color:#258066; background:#e5faf2; padding:4px 7px; border-radius:99px; font-weight:800; }
+    .roster-note { margin:0 0 12px; color:var(--muted); font-size:.78rem; line-height:1.4; }
+    @media (max-width:720px) { .shell { width:min(100% - 24px,620px); } .circle-grid { gap:13px; } .circle-center { inset:19%; } .live-layout { grid-template-columns:1fr; } .panel { padding:20px; } header { padding-top:18px; } .tag { display:none; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header><div class="brand">i<span>Ramble</span></div><div class="tag">Public conversations, one circle at a time</div></header>
+    <section id="home">
+      <div class="intro"><h1>Find a circle to talk in.</h1><p>Reserve an empty circle for a public conversation. Each circle has one host and up to eleven listeners.</p></div>
+      <p class="helper">Tap an empty circle to start a room, or tap an active circle to join it.</p>
+      <div class="circle-grid" id="circleGrid"></div>
+    </section>
+    <section class="room-view" id="roomView">
+      <button class="back" id="backButton">← Back to circles</button>
+      <div class="live-layout">
+        <article class="panel">
+          <span class="state" id="roomState">LIVE NOW</span>
+          <h1 class="room-title" id="roomTitle"></h1>
+          <p class="room-description" id="roomDescription">This is a public room. The host can invite people from the hand queue to speak.</p>
+          <div class="stage"><div><div class="mic">🎙</div><strong id="speakerName">Room creator is speaking</strong><p>One person speaks at a time. Listeners can raise a hand.</p></div></div>
+          <div class="room-controls"><button class="primary" id="handButton">Raise hand</button><button class="soft" id="joinButton">Join room</button><button class="danger" id="leaveButton">Leave room</button><button class="soft" id="reportButton">Report</button></div>
+          <div class="queue"><h3>Speaker queue</h3><div id="queueContent">No hands raised yet.</div></div>
+        </article>
+        <aside class="panel roster"><h3>In this room <span id="countText"></span></h3><p class="roster-note">These are the people signed up for this circle.</p><div id="rosterList"></div></aside>
+      </div>
+    </section>
+  </main>
+  <div class="modal" id="reserveModal" aria-hidden="true"><form class="dialog" id="reserveForm"><h2>Reserve a circle</h2><p>Pick a topic. Your room is public, and can begin even if it is not full.</p><label for="hostName">Your display name</label><input id="hostName" required maxlength="24" placeholder="e.g. Mina"><label for="topic">Conversation topic</label><input id="topic" required maxlength="60" placeholder="e.g. Calgary Stampede"><label for="when">Start time</label><select id="when"><option value="0">Start now</option><option value="1">Start in 1 minute</option><option value="5">Start in 5 minutes</option><option value="15">Start in 15 minutes</option></select><div class="actions"><button type="button" class="soft" id="cancelReserve">Cancel</button><button class="primary">Reserve circle</button></div></form></div>
+  <script>
+    const STORAGE = 'iramble-public-rooms-v2';
+    let rooms = JSON.parse(localStorage.getItem(STORAGE) || '[]');
+    let reservingIndex = null, openIndex = null;
+    const $ = id => document.getElementById(id);
+    const save = () => localStorage.setItem(STORAGE, JSON.stringify(rooms));
+    const initials = name => name.split(/\s+/).map(x=>x[0]).join('').slice(0,2).toUpperCase();
+    function active(room) { return room && room.topic; }
+    function isLive(room) { return Date.now() >= room.startsAt; }
+    function timeLabel(room) { const seconds=Math.max(0,Math.ceil((room.startsAt-Date.now())/1000)); if(seconds===0) return 'LIVE'; return `starts in ${Math.ceil(seconds/60)} min`; }
+    function renderGrid() {
+      const grid=$('circleGrid'); grid.innerHTML='';
+      for(let i=0;i<9;i++) { const room=rooms[i]; const button=document.createElement('button'); button.className='room-circle'+(active(room)?' active':'')+(active(room)&&isLive(room)?' live':'');
+        button.innerHTML=active(room)?`<span class="circle-center">${room.topic}<small>${timeLabel(room)} · ${room.members.length}/12</small></span>`:'<span class="circle-center">＋<small>Reserve a circle</small></span>';
+        button.onclick=()=>active(room)?openRoom(i):reserve(i); const caption=document.createElement('div'); caption.className='circle-caption'; caption.innerHTML=active(room)?`<strong>${room.topic}</strong>${room.members.length} signed up`:'Available public room'; const card=document.createElement('div'); card.className='circle-card'; card.append(button,caption); grid.append(card);
       }
-      persist(); closeRoom(); render();
-    };
-  };
-  $('#form').onsubmit = event => {
-    event.preventDefault();
-    rooms[pending] = { topic: $('#topic').value.trim(), starts: Date.now() + (+$('#minutes').value * 60000), seats: 1, mySeat: 0 };
-    persist(); $('#modal').classList.remove('open'); $('#form').reset(); render();
-  };
-</script></body></html>
+    }
+    function reserve(index) { reservingIndex=index; $('reserveModal').classList.add('open'); $('reserveModal').setAttribute('aria-hidden','false'); $('hostName').focus(); }
+    function closeModal() { $('reserveModal').classList.remove('open'); $('reserveModal').setAttribute('aria-hidden','true'); }
+    $('cancelReserve').onclick=closeModal;
+    $('reserveForm').onsubmit=e=>{ e.preventDefault(); const name=$('hostName').value.trim(), topic=$('topic').value.trim(), minutes=Number($('when').value); rooms[reservingIndex]={topic,startsAt:Date.now()+minutes*60000,members:[{name,role:'Host',mine:true,hand:false}]}; save(); closeModal(); openRoom(reservingIndex); e.target.reset(); };
+    function openRoom(index) { openIndex=index; const room=rooms[index]; $('home').style.display='none'; $('roomView').classList.add('show'); $('roomTitle').textContent=room.topic; updateRoom(); }
+    function updateRoom() { const room=rooms[openIndex]; if(!room) return backHome(); const live=isLive(room); $('roomState').textContent=live?'LIVE NOW':timeLabel(room).toUpperCase(); $('speakerName').textContent=`${room.members[0].name} is ${live?'speaking':'hosting the lobby'}`; $('countText').textContent=`${room.members.length} / 12`; const me=room.members.find(m=>m.mine); $('joinButton').style.display=me?'none':'inline-block'; $('handButton').style.display=me?'inline-block':'none'; $('leaveButton').style.display=me?'inline-block':'none'; $('handButton').textContent=me&&me.hand?'Hand raised ✓':'Raise hand';
+      const roster=$('rosterList'); roster.innerHTML=''; room.members.forEach((member,n)=>{ const status=n===0?'Speaking':member.hand?'Hand raised':'Listening'; const div=document.createElement('div'); div.className='member'; div.innerHTML=`<div class="avatar">${initials(member.name)}</div><div class="member-text">${member.name}${member.mine?' (You)':''}<small>${member.role}${n===0?' · Room creator':''}</small></div><span class="member-state">${status}</span>`; roster.append(div); });
+      const queued=room.members.filter(m=>m.hand); $('queueContent').innerHTML=queued.length?queued.map(m=>`<div class="queue-item"><div class="avatar">${initials(m.name)}</div><div class="member-text">${m.name}<small>Waiting to speak</small></div></div>`).join(''):'No hands raised yet.';
+    }
+    $('joinButton').onclick=()=>{ const name=prompt('What name should appear in this room?'); if(!name||!name.trim())return; const room=rooms[openIndex]; if(room.members.length>=12)return alert('This circle is full.'); room.members.push({name:name.trim().slice(0,24),role:'Listener',mine:true,hand:false}); save(); updateRoom(); renderGrid(); };
+    $('handButton').onclick=()=>{ const me=rooms[openIndex].members.find(m=>m.mine); me.hand=!me.hand; save(); updateRoom(); };
+    $('leaveButton').onclick=()=>{ const room=rooms[openIndex], myIndex=room.members.findIndex(m=>m.mine); if(myIndex===0){ if(!confirm('Leaving as host will close this circle for everyone. Continue?'))return; rooms[openIndex]=null; } else room.members.splice(myIndex,1); save(); renderGrid(); backHome(); };
+    $('reportButton').onclick=()=>alert('Thanks. In a real iRamble app, this would send a report to moderators.');
+    function backHome(){ $('roomView').classList.remove('show'); $('home').style.display='block'; openIndex=null; renderGrid(); }
+    $('backButton').onclick=backHome;
+    renderGrid(); setInterval(()=>{ renderGrid(); if(openIndex!==null) updateRoom(); },1000);
+  </script>
+</body>
+</html>
